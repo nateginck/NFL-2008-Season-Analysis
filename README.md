@@ -2,8 +2,8 @@
 This project gives a full analytical breakdown of the 2008 NFL season.
 
 ## Contents  
-- **NBA 2015-2016 Season Analysis.pdf** – A detailed write-up of the results, including simulation outcomes, plots, and analysis.  
-- **Code & Datasets** – All scripts and data used for the simulation are included in this repository.  
+- **Analysis of the 2008 NFL Season.pdf** – A detailed presentation of my findings, covering a broad range of sports analytics tools including QBR , home field advantage, Pythagorean Win Percentage, Bradley-Terry Ratings, and a Monte Carlo season simulation.
+- **Code & Datasets** – R Markdown file and data used for the analysis are included in this repository.  
 
 ## Overview  
-By leveraging Elo ratings, this analysis simulates the 2015-2016 NBA season to explore potential outcomes and compare them with actual results.  
+By using a variety of metrics, this presentation compares the expected performance of teams to their actual performance, providing insight on the biggest overachiever and underachiever. Additionally, distribution of QBR and scoring distributions are discussed.
