@@ -1,0 +1,482 @@
+Read Data
+```{r}
+NFL <- read.csv("nfl_data.csv")
+ELO <- read.csv("nfl_initial_elos.csv")
+```
+
+
+Player Statistics
+```{r}
+Player <- read.csv("player.csv")
+PlayerFiltered <- Player[Player$GS >= 8, ]
+PlayerFiltered <- PlayerFiltered[PlayerFiltered$Pos == "QB", ]
+
+
+hist(PlayerFiltered$QBR, xlab = "QBR", main = "QBR of Quarterbacks That Started at Least Eight Games", col = "gold")
+boxplot(PlayerFiltered$QBR, horizontal = TRUE, main = "QBR of Quarterbacks That Started at Least Eight Games", col = "gold", pch = 19)
+summary(PlayerFiltered$QBR)
+sd(PlayerFiltered$QBR)
+```
+
+Scoring Distributions
+```{r}
+NFL08 <- NFL[NFL$season == 2008, ]
+mean(NFL08$home_score)
+sd(NFL08$home_score)
+
+mean(NFL08$away_score)
+sd(NFL08$away_score)
+
+NFL08$MoV <- NFL08$home_score - NFL08$away_score
+
+mean(NFL08$MoV)
+sd(NFL08$MoV)
+
+hist(NFL08$MoV, main = "Margin of Victory in 2008 Season", xlab = "Margin of Victory (Home Score - Away Score)", col = "gold")
+
+plot(NFL08$home_score, NFL08$away_score, pch = 19, xlab = "Home Scores", ylab = "Away Scores")
+cor(NFL08$home_score, NFL08$away_score)
+```
+Pythagorean Win Percentages 
+```{r}
+scores <- read.csv("nfl_scores.csv")
+
+# manually give lions .5 win
+scoresAdj <- scores
+scoresAdj[24,2] <- 0.5
+
+# Fit model to obtain optimal Pythagorean exponent
+model = lm(log((W)/(L)) ~ 0 + log(PF/PA), data = scoresAdj)
+summary(model)
+
+scores$pyth_wpct = scores$PF^coef(model) / (scores$PF^coef(model) + scores$PA^coef(model))
+
+# determine actual win percentage
+scores$wpct = scores$W / (scores$W + scores$L)
+
+# find correlation
+cor(scores$pyth_wpct, scores$wpct)
+AFC <- scores[1:16, ]
+NFC <- scores[17:32, ]
+
+library(ggplot2)
+ggplot(AFC, aes(x = Tm)) +
+  geom_point(aes(y = wpct, color = "Win Percentage")) +
+  geom_point(aes(y = pyth_wpct, color = "Pythagorean Win Percentage")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1)) + # Rotate x-axis labels
+  labs(title = "Win Percentage vs Pythagorean Win Percentage in the AFC",
+       y = "Percentage",
+       x = "Teams",
+       color = "Legend")
+  
+ggplot(NFC, aes(x = Tm)) +
+  geom_point(aes(y = wpct, color = "Win Percentage")) +
+  geom_point(aes(y = pyth_wpct, color = "Pythagorean Win Percentage")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1)) + # Rotate x-axis labels
+  labs(title = "Win Percentage vs Pythagorean Win Percentage in the NFC",
+       y = "Percentage",
+       x = "Teams",
+       color = "Legend")
+
+scores$diff = (scores$wpct - scores$pyth_wpct)
+
+
+plot(scores$wpct, scores$diff, pch = 19, xlab = "Actual Win Percentage", ylab = "Actual Win Percentage - Pythagorean Win Percentage")
+abline(h = 0)
+```
+
+Bradley-Terry
+```{r}
+# Regular season only
+NFL08 <- NFL08[NFL08$game_type == 'r', ]
+
+# Create empty data frame for margin of victory, game location, and one column for each team
+nfl_data = as.data.frame(matrix(nrow = 256, ncol = 34))
+
+# Identify unique names of all 32 NFL teams
+teams = sort(unique(NFL08$home_team))
+
+# Replace generic column names in 'nfl_data' data frame with columns for margin of victory, location, and the 32 team names
+colnames(nfl_data) = c("MoV", "Location", teams)
+
+# Replace all entries in data frame with 0
+nfl_data[is.na(nfl_data)] = 0
+
+# The following loop iterates through all 32 teams.  For each team, the first line sets the value equal to 1 if that team was at home and 0 otherwise.  The second line sets the value equal to -1 if that team was away and 0 otherwise.  These two lists are added together so that 16 entries are not 0: the 8 home games and the 8 away games.  These are the only 16 games the team played in, which is why the other 240 games are set equal to 0 in that team's column
+
+for (i in 1:length(teams)) {    # Iterate through all teams
+    home = as.integer(NFL08$home_team == teams[i])      # Set row equal to 1 if current team was at home
+    away = -1*as.integer(NFL08$away_team == teams[i])   # Set row equal to -1 if current team was away
+    team_locations = home + away                             # Combine 1's, 0's, and -1's to identify all games for current team
+    nfl_data[, i+2] = team_locations                         # Replace column of 0's with 1's and -1's for all games they played in
+}
+
+# Set margin of victory to be home score minus away score
+nfl_data$MoV = NFL08$home_score - NFL08$away_score
+
+# Set game location to be 1 if the home team was in their home stadium; set equal to 0 if the game was played at a neutral location with a designated home team.  This normally needs to be done manually in practice, but will always be provided for you in the original dataset for the purposes of this course.
+nfl_data$Location = NFL08$location
+
+# Fit Bradley-Terry model
+model = lm(MoV ~ 0 + ., data = nfl_data)
+
+# Extract only coefficients from model summary
+coefficients = coef(model, complete = TRUE)
+
+# Change baseline team's rating from NA to 0 so every team has a numeric value
+coefficients[length(coefficients)] = 0
+
+# Calculate the amount ratings need to be adjusted by, equal to the sum of the coefficients for the teams that are not the baseline divided by the number of teams in the league
+adjustment = -1 * sum(coefficients[2:length(coefficients)]) / (length(coefficients) - 1)
+
+# Adjust the ratings by adding the adjustment to each team's rating, leaving the intercept alone.  The sum of the coefficients should now be equal to the intercept, meaning the average rating for all teams is 0.
+ratings = c(coefficients[1], coefficients[2:length(coefficients)] + adjustment) 
+hist(ratings, col = "gold")
+```
+Elo
+```{r}
+scores = read.csv("nfl_data.csv")
+elos = read.csv("nfl_initial_elos.csv")
+
+team = "Pittsburgh Steelers"
+first_season = 2008
+last_season = 2008
+
+
+# Input the optimal k factors (weight) and home field advantage
+weight = 17.9
+hfa = 53.67
+
+
+# Identify if ties exist in the sport, which determines if an additional 0.5 needs to be added to the margin of victory
+if (sum(scores$tie) > 0) {
+    tie_adj = 0.5 
+} else {
+    tie_adj = 0
+}
+
+# Create data frame to store information for team specified above
+team_results = data.frame(matrix(ncol = 10, nrow = 0))
+colnames(team_results) = c("opponent", "pregame_elo", "opponent_pregame_elo", "win_probability", "result", "team_score", "opponent_score", "elo_adjustment", "postgame_elo", "opponent_postgame_elo")
+
+# Iterate through all games in the sport's history
+for(i in 1:nrow(scores)) {
+    # Find indices corresponding to home and away teams for current game
+    home_index = which(elos$team == scores$home_team[i])
+    away_index = which(elos$team == scores$away_team[i])
+    
+    
+    # Find home and away team Elo ratings
+    home_elo = elos$rating[home_index]
+    away_elo = elos$rating[away_index]
+    
+    
+    # Calculate home team win probability
+    win_prob = 1 / (10^((away_elo - (home_elo + hfa*scores$location[i]))/400) + 1)
+    
+    
+    # Calculate actual margin of victory - must be positive
+    score_diff = abs(scores$home_score[i] - scores$away_score[i])   
+    
+    
+    # Determine home team result
+    if(scores$home_score[i] > scores$away_score[i]) { 
+        home_result = 1  # Home team wins
+    } else if(scores$home_score[i] < scores$away_score[i]) { 
+        home_result = 0  # Home team loses
+    } else { 
+        home_result = 0.5  # Tie
+    }
+  
+    
+    # Calculate amount each team's Elo rating is adjusted by
+    home_elo_adjustment = weight * log(score_diff + 1 + tie_adj) * (home_result - win_prob)
+    
+    
+    # Adjust Elo ratings - add point to winner and subtract points from loser
+    elos$rating[home_index] = elos$rating[home_index] + home_elo_adjustment
+    elos$rating[away_index] = elos$rating[away_index] - home_elo_adjustment
+
+    
+    # Add game information to team result data frame for each team game of the team specified above if team and season both match
+    if(scores$season[i] >= first_season & scores$season[i] <= last_season & (scores$home_team[i] == team | scores$away_team[i] == team)) {
+        if(scores$home_team[i] == team) {  # If specified team was at home
+            team_results[nrow(team_results) + 1,] = c(scores$away_team[i], elos$rating[home_index] - home_elo_adjustment, elos$rating[away_index] + home_elo_adjustment, win_prob, home_result, scores$home_score[i], scores$away_score[i], home_elo_adjustment, elos$rating[home_index], elos$rating[away_index])
+        } else {  # If specified team was away
+            team_results[nrow(team_results) + 1,] = c(scores$home_team[i], elos$rating[away_index] + home_elo_adjustment, elos$rating[home_index] - home_elo_adjustment, 1-win_prob, 1-home_result, scores$away_score[i], scores$home_score[i], -1*home_elo_adjustment, elos$rating[away_index], elos$rating[home_index])
+        }
+    }
+    
+    
+    # Adjust Elo ratings at end of season to regress 1/3 of the way towards 1500
+    if(i < nrow(scores) && scores$season[i+1] > scores$season[i]) {  # New season
+        for(j in 1:nrow(elos)) {  # For each team
+            if(scores$season[i] >= elos$inaugural_season[j]) {  # Check if team existed
+                # Move each team's Elo rating back towards 1500 by 1/3 of the difference
+                elos$rating[j] = elos$rating[j] - (elos$rating[j] - 1500)/3
+            }
+        }
+        
+        
+        # Identify all teams that existed at beginning of following season
+        existing_teams = elos[which(elos$inaugural_season <= (scores$season[i] + 1)),]
+        
+        
+        # Calculate amount each team's Elo rating must be adjusted by to make mean 1500
+        expansion_adjustment = -1*(mean(existing_teams$rating) - 1500)
+        
+        
+        # Perform expansion adjustment on teams that existed at beginning of following season
+        for(j in 1:nrow(elos)) {  # For each team
+            if((scores$season[i] + 1) >= elos$inaugural_season[j]) {  # Check if team existed
+                elos$rating[j] = elos$rating[j] + expansion_adjustment  # Update ratings if so
+            }
+        }
+    }
+}
+
+
+# Create plot of postgame Elo ratings
+if (first_season == last_season) {
+    team_name = paste(first_season, team)
+} else {
+    team_name = paste(paste(first_season, last_season, sep = "-"), team)
+}
+
+plot(team_results$postgame_elo, type = "l", xlab = team_name, ylab = "Elo Rating")
+abline(h = 1500)
+```
+Simulated Regular Season
+```{r}
+# Specify season to simulate
+simulated_season = 2008
+
+# Read in list of all games
+scores = read.table("nfl_data.csv", header = TRUE, sep = ",")
+
+# Read in initial Elo rating, conference, and division
+team_info = read.table("nfl_initial_elos.csv", header = TRUE, sep = ",")
+
+# Obtain list of unique conference names and unique division names
+conferences = na.omit(unique(team_info$conference))
+divisions = na.omit(unique(team_info$division))
+
+# Create list of games that occurred prior to season being simulated
+pre_season = scores[which(scores$season < simulated_season & scores$season >= 1933),]
+
+# Create list of regular season games for season being simulated
+season_schedule = scores[which(scores$season == simulated_season & (scores$game_type == "r" | scores$game_type == "np")),]
+
+# Input the optimal k factors (weight) and home field advantage
+weight = 17.9
+hfa = 53.67
+
+# Identify if ties exist in the sport, which determines if an additional 0.5 needs to be added to the margin of victory
+if (sum(scores$tie) > 0) {
+    tie_adj = 0.5 
+} else {
+    tie_adj = 0
+}
+
+# Iterate through all games in the sport's history up to season being simulated
+for(i in 1:nrow(pre_season)) {
+    # Find indices corresponding to home and away teams for current game
+    home_index = which(team_info$team == pre_season$home_team[i])
+    away_index = which(team_info$team == pre_season$away_team[i])
+    
+    # Find home and away team Elo ratings
+    home_elo = team_info$rating[home_index]
+    away_elo = team_info$rating[away_index]
+    
+    # Calculate home team win probability
+    win_prob = 1 / (10^((away_elo - (home_elo + hfa*pre_season$location[i]))/400) + 1)
+    
+    # Calculate actual margin of victory - must be positive
+    score_diff = abs(pre_season$home_score[i] - pre_season$away_score[i])
+    
+    # Determine home team result
+    if(pre_season$home_score[i] > pre_season$away_score[i]) { 
+    home_result = 1  # Home team wins
+    } else if(pre_season$home_score[i] < pre_season$away_score[i]) { 
+    home_result = 0  # Home team loses
+    } else { 
+    home_result = 0.5  # Tie
+    }
+    
+    # Calculate amount each team's Elo rating is adjusted by
+    home_elo_adjustment = weight * log(score_diff + 1 + tie_adj) * (home_result - win_prob)
+
+  
+    # Adjust Elo ratings - add point to winner and subtract points from loser
+    team_info$rating[home_index] = team_info$rating[home_index] + home_elo_adjustment
+    team_info$rating[away_index] = team_info$rating[away_index] - home_elo_adjustment
+    
+    # Adjust Elo ratings at end of season to regress 1/3 of the way towards 1500
+    if(i < nrow(scores) && scores$season[i+1] > scores$season[i]) {
+        for(j in 1:nrow(team_info)) {
+            if(scores$season[i] >= team_info$inaugural_season[j]) {
+                team_info$rating[j] = team_info$rating[j] - (team_info$rating[j] - 1500)/3
+                }
+        }
+    
+        # Identify all teams that existed at beginning of following season
+        existing_teams = team_info[which(team_info$inaugural_season <= (scores$season[i] + 1)),]
+    
+        # Calculate amount each team's Elo rating must be adjusted by to make mean 1500
+        expansion_adjustment = -1*(mean(existing_teams$rating) - 1500)
+    
+        # Perform expansion adjustment on teams that existed at beginning of following season
+        for(j in 1:nrow(team_info)) {
+            if((scores$season[i] + 1) >= team_info$inaugural_season[j]) {
+                team_info$rating[j] = team_info$rating[j] + expansion_adjustment
+            }
+        }
+    }
+}
+
+# Set seed for replication purposes
+set.seed(1)
+
+# Determine number of times to simulate the season
+iterations = 10000
+
+# Create data frame to hold Elo ratings, actual win totals, and simulation results
+results = data.frame(matrix(0, ncol = 6, nrow = nrow(team_info)))
+colnames(results) = c("team", "starting_elo", "ending_elo", "actual_wins", "average_wins", "division_titles")
+results$team = team_info$team
+
+# Create data frame to hold number of wins by each team in each iteration
+win_totals = data.frame(matrix(0, ncol = nrow(team_info), nrow = iterations))
+colnames(win_totals) = team_info$team
+
+# Simulate the season the given number of times
+for(i in 1:iterations) {
+    if(i %% 10000 == 0) {print(i)}
+    season_stats = team_info[,which(colnames(team_info) != "inaugural_season")]
+    season_stats$wins = 0
+    season_stats$rand = runif(nrow(team_info))
+    
+    # Simulate each game in current season
+    for(j in 1:nrow(season_schedule)) {
+        # Find indices corresponding to home and away teams for current game
+        home_index = which(season_stats$team == season_schedule$home_team[j])
+        away_index = which(season_stats$team == season_schedule$away_team[j])
+        
+        # Find home and away team Elo ratings
+        home_elo = season_stats$rating[home_index]
+        away_elo = season_stats$rating[away_index]
+        
+        # Calculate home team win probability
+        win_prob = 1 / (10^((away_elo - (home_elo + hfa*season_schedule$location[j]))/400) + 1)
+        u = runif(1)  # Generate a random number used to determine the winner of the game
+        
+        # Determine which team wins the simulated game and increment their win total by 1
+        if(u < win_prob) {
+            season_stats$wins[home_index] = season_stats$wins[home_index] + 1
+        } else {
+            season_stats$wins[away_index] = season_stats$wins[away_index] + 1
+        }
+    
+        # Calculate actual margin of victory - must be positive
+        score_diff = abs(season_schedule$home_score[j] - season_schedule$away_score[j])
+        
+        # Determine home team result
+        if(season_schedule$home_score[j] > season_schedule$away_score[j]) { 
+          home_result = 1  # Home team wins
+        } else if(season_schedule$home_score[j] < season_schedule$away_score[j]) { 
+          home_result = 0  # Home team loses
+        } else { 
+          home_result = 0.5  # Tie
+        }
+        
+        # Calculate amount each team's Elo rating is adjusted by
+        home_elo_adjustment = weight * log(score_diff + 1 + tie_adj) * (home_result - win_prob)
+        
+        # Adjust Elo ratings after game has been simulated to get team's new strength
+        season_stats$rating[home_index] = season_stats$rating[home_index] + home_elo_adjustment
+        season_stats$rating[away_index] = season_stats$rating[away_index] - home_elo_adjustment
+    
+        # Track season wins
+        if(i == 1) {
+            if(season_schedule$home_score[j] > season_schedule$away_score[j]) {
+                results$actual_wins[home_index] = results$actual_wins[home_index] + 1
+            } else if(season_schedule$home_score[j] < season_schedule$away_score[j]) {
+                results$actual_wins[away_index] = results$actual_wins[away_index] + 1
+            } else {
+                results$actual_wins[home_index] = results$actual_wins[home_index] + 0.5
+                results$actual_wins[away_index] = results$actual_wins[away_index] + 0.5
+            }
+        }
+    }
+
+    # Define data frame that contains division winners
+    division_winners = data.frame(matrix(ncol = 6, nrow = 0))
+    colnames(division_winners) = c("team", "conference", "division", "rating", "wins", "rand")
+  
+    # For each division
+    for(div in divisions) {
+        div_standings = season_stats[which(season_stats$division == div),]  # Identify all teams in current division
+        div_standings = div_standings[order(-div_standings$wins, -div_standings$rand),]  # Sort division by wins and random number
+        division_winners = rbind(division_winners, div_standings[1,])  # Add division winner to 'division_winners' data frame
+    }
+  
+    # Save end of season win totals (from column 5 of season_stats) for each iteration in the win_totals data frame
+    win_totals[i,] = t(season_stats[5])
+    
+    # Add number of wins for each team during this iteration to sum
+    results$average_wins = results$average_wins + season_stats$wins
+  
+    # Increment the number of division titles for each division winner by 1
+    for(team in division_winners$team) {
+        index = which(season_stats$team == team)  # Index of division winner
+        results$division_titles[index] = results$division_titles[index] + 1  # Increment division titles
+    }
+}
+
+# remove old teams
+results <- results[1:(nrow(results) - 5), ]
+team_info  <- team_info[1:(nrow(team_info) - 5), ]
+season_stats <- season_stats[1:(nrow(season_stats) - 5), ]
+
+
+# Calculate average number of wins across all iterations
+results$starting_elo = team_info$rating
+results$ending_elo = season_stats$rating
+results$average_wins = results$average_wins/iterations
+results$division_titles = results$division_titles/iterations
+
+results$diff = results$actual_wins - results$average_wins
+
+hist(abs(results$actual_wins - results$average_wins), col = "gold", xlab = "Absolute Margin of Error", main = "Margin of Error Between Actual Wins and Predicted Wins")
+
+library(ggplot2)
+ggplot(results, aes(x = team)) +
+  geom_point(aes(y = actual_wins, color = "Actual Wins")) +
+  geom_point(aes(y = average_wins, color = "Predicted Wins")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1)) + # Rotate x-axis labels
+  labs(title = "Actual Wins vs Predicted Wins in Monte Carlo Simulation",
+       y = "Amount of Wins",
+       x = "Teams",
+       color = "Legend")
+
+plot(results$actual_wins, results$diff, pch = 19, xlab = "Actual Wins", ylab = "Actual Wins - Average Win Percentage")
+abline(h = 0)
+
+
+# find win total histograms
+hist(win_totals$`Miami Dolphins`, col = "cyan2", border = "sienna1", xlab = "Predicted Win Total", main = "Histogram of Simulated Miami Dolphin Win Totals")
+
+hist(win_totals$`Detroit Lions`, col = "deepskyblue2", border = "slategrey", xlab ="Predicted Win Total", main = "Histogram of Simulated Detroit Lions Win Totals")
+
+ggplot(results, aes(x = team)) +
+  geom_point(aes(y = ending_elo, color = "Ending Elo")) +
+  geom_point(aes(y = starting_elo, color = "Starting Elo")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1)) + # Rotate x-axis labels
+  labs(title = "Elo Before and After 2008 NFL Season",
+       y = "Elo",
+       x = "Teams",
+       color = "Legend")
+
+```
+
+
